@@ -134,7 +134,7 @@ body{padding:12px 10px 80px}
 </head>
 <body>
 <div id="app"></div><button id="snd" class="ic" aria-label="Suara">♪</button>
-<script src="https://cdn.ably.com/lib/ably.min-2.js"></script>
+<script src="https://cdn.ably.com/lib/ably.min-3.js"></script>
 <script type="module">
 const $=s=>document.querySelector(s),app=$('#app');
 const lab=v=>({S:'⊘',R:'⇄',D:'+2',W:'✦',F:'+4'}[v]||v);
@@ -144,7 +144,7 @@ const CN={r:'Merah',y:'Kuning',g:'Hijau',b:'Biru'};
 const ABLY_KEY='1T0blg.woYYRA:u5l0dTBwnVg9Sz7vgrwTUeHcIrtAFufVq21zR53vBVU';
 // ==========================================
 const S={code:null,slot:null,room:null,pick:null,v:0,dl:0,dur:30,seen:null,uno:0,gn:0,np:1,hide:0,lr:-1,host:false,R:null,rt:null,ch:null,gh:null,lob:null,matched:false,jres:null,hostCid:null};
-const CID=sessionStorage.v_cid||(sessionStorage.v_cid=Math.random().toString(36).slice(2,10));
+const CID=localStorage.v_cid||(localStorage.v_cid=Math.random().toString(36).slice(2,10));
 
 // ===== Mesin game (dijalankan di browser pemilik room) =====
 const AL='ABCDEFGHJKLMNPQRSTUVWXYZ23456789',rc=()=>Array.from({length:4},()=>AL[Math.random()*AL.length|0]).join('');
@@ -204,7 +204,7 @@ function onJoin(m){
 
 // ===== Jaringan (Ably) =====
 const go=async b=>{if(S.host)hostAct(0,b);else await S.ch.publish('act',{cid:CID,...b})};
-const connect=()=>{if(!S.rt)S.rt=new Ably.Realtime({key:ABLY_KEY,clientId:CID})};
+const connect=()=>{if(!S.rt)S.rt=AblyPubSub.createClient({key:ABLY_KEY,clientId:CID})};
 function cleanup(){
   for(const c of[S.ch,S.gh])if(c){c.unsubscribe();c.presence.unsubscribe();c.detach().catch(()=>{})}
   S.ch=S.gh=null;S.R=null;S.host=false;S.code=null;S.room=null;S.jres=null}
