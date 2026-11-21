@@ -183,7 +183,7 @@ function mkView(R,me){
   if(g){o.g={disc:[g.disc[g.disc.length-1]],color:g.color,turn:g.turn,msg:g.msg,win:g.win,r:g.r,n:g.n,k:g.k,by:g.by,uno:g.uno,dur:g.dur,left:g.dl-Date.now(),nd:g.deck.length,h:[...g['h'+me]],no:g['h'+op].length};
     if(R.status==='over')o.g.oh=[...g['h'+op]]}
   return o}
-function bcast(){const R=S.R;if(!R)return;R.v++;apply(mkView(R,0));if(R.p[1]&&S.gh)S.gh.publish('view',{to:R.p[1].cid,d:mkView(R,1)})}
+function bcast(){const R=S.R;if(!R)return;R.v++;apply(mkView(R,0));if(R.p[1]&&S.gh)S.gh.publish('view',{to:R.p[1].cid,from:CID,d:mkView(R,1)})}
 function hostAct(me,b){
   const R=S.R;if(!R)return;
   try{const A=b.act;
@@ -204,7 +204,10 @@ function onJoin(m){
 
 // ===== Jaringan (Ably) =====
 const go=async b=>{if(S.host)hostAct(0,b);else await S.ch.publish('act',{cid:CID,...b})};
-const connect=()=>{if(!S.rt)S.rt=AblyPubSub.createClient({key:ABLY_KEY,clientId:CID})};
+const connect=()=>{if(S.rt)return;
+  S.rt=AblyPubSub.createClient({key:ABLY_KEY,clientId:CID});
+  S.rt.connection.on(c=>{console.log('ably',c.current,c.reason&&c.reason.message);
+    if(c.current==='failed'||c.current==='suspended')toast('Koneksi Ably '+c.current+(c.reason?': '+c.reason.message:''))})};
 function cleanup(){
   for(const c of[S.ch,S.gh])if(c){c.unsubscribe();c.presence.unsubscribe();c.detach().catch(()=>{})}
   S.ch=S.gh=null;S.R=null;S.host=false;S.code=null;S.room=null;S.jres=null}
@@ -215,21 +218,22 @@ async function hostRoom(name,rand){
   await S.ch.subscribe('join',onJoin);
   await S.ch.subscribe('act',m=>{if(S.R?.p[1]&&m.data.cid===S.R.p[1].cid)hostAct(1,m.data)});
   S.ch.presence.subscribe('leave',m=>{const R=S.R;if(R?.p[1]&&m.clientId===R.p[1].cid&&R.status==='lobby'){delete R.p[1];bcast()}});
-  await S.ch.presence.enter({role:'host'})}
+  S.ch.presence.enter({role:'host'}).catch(()=>{})}
 async function joinRoom(code,name){
-  connect();code=code.toUpperCase();S.host=false;S.slot=1;S.code=code;
+  connect();code=code.toUpperCase();S.host=false;S.slot=1;S.code=code;S.last=Date.now();
   S.ch=S.rt.channels.get('h:'+code);S.gh=S.rt.channels.get('g:'+code);
   const first=new Promise((ok,no)=>{S.jres={ok,no}});
-  await S.gh.subscribe('view',m=>{if(m.data.to===CID){apply(m.data.d);S.jres?.ok()}});
+  await S.gh.subscribe('view',m=>{if(m.data.to!==CID)return;S.hostCid=m.data.from;S.last=Date.now();apply(m.data.d);S.jres?.ok()});
   await S.gh.subscribe('deny',m=>{if(m.data.to===CID)S.jres?.no(new Error(m.data.m))});
   await S.gh.subscribe('closed',()=>roomClosed());
-  S.ch.presence.subscribe('leave',m=>{if(m.clientId===S.hostCid)roomClosed()});
-  const mem=await S.ch.presence.get(),h=mem.find(x=>x.data?.role==='host');
-  if(!h)throw new Error('Room tidak ditemukan');
-  S.hostCid=h.clientId;
-  await S.ch.presence.enter({role:'guest'});
+  await S.gh.subscribe('hb',()=>{S.last=Date.now()});
+  S.ch.presence.subscribe('leave',m=>{if(S.hostCid&&m.clientId===S.hostCid)roomClosed()}).catch(()=>{});
+  S.ch.presence.enter({role:'guest'}).catch(()=>{});
+  const hello=()=>S.ch&&S.ch.publish('join',{cid:CID,name}).catch(()=>{});
   await S.ch.publish('join',{cid:CID,name});
-  await Promise.race([first,new Promise((_,no)=>setTimeout(()=>no(new Error('Pemilik room tidak merespons')),6000))])}
+  const retry=setTimeout(hello,2500);
+  try{await Promise.race([first,new Promise((_,no)=>setTimeout(()=>no(new Error('Room tidak ditemukan atau pemiliknya sudah keluar')),7000))])}
+  finally{clearTimeout(retry)}}
 function begin(showCode){S.v=0;S.seen=null;S.hide=0;if(showCode)history.pushState(0,'','/r/'+S.code);S.host?bcast():view()}
 function roomClosed(){if(!S.code)return;toast('Pemilik room keluar, room ditutup');leave(true)}
 async function stopSeek(){S.matched=true;const L=S.lob;S.lob=null;if(L){L.unsubscribe();L.presence.unsubscribe();await L.presence.leave().catch(()=>{});L.detach().catch(()=>{})}}
@@ -297,7 +301,7 @@ const myName=()=>{const n=($('#nm')?.value||localStorage.v_name||'').trim().slic
 
 function home(msg){
   const pre=(location.pathname.match(/^\/r\/([A-Za-z0-9]{4})/)||[])[1]?.toUpperCase()||'';
-  app.innerHTML=`<div class="brand"><h1>VELOUR</h1><p>UNO ONLINE · DUA PEMAIN</p></div>
+  app.innerHTML=`<div class="brand"><h1>VELOUR</h1><p>UNO ONLINE · DUA PEMAIN · v4</p></div>
   <div class="glass panel"><label for="nm">Nama panggilanmu</label>
   <input id="nm" maxlength="14" placeholder="mis. Raka" value="${esc(localStorage.v_name||'')}" autocomplete="off">
   <button class="btn pri" data-a="create">Buat room baru</button>
@@ -399,6 +403,9 @@ app.onclick=async e=>{
   }catch(err){if(start){cleanup();home()}toast(err.message)}};
 
 setInterval(()=>{const R=S.R;if(S.host&&R&&R.status==='playing'&&Date.now()>R.g.dl){auto(R);bcast()}},400);
+setInterval(()=>{if(S.host&&S.gh&&S.R?.p[1])S.gh.publish('hb',{}).catch(()=>{})},4000);
+setInterval(()=>{if(S.code&&!S.host&&S.last&&Date.now()-S.last>15000)roomClosed()},3000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)S.last=Date.now()});
 home();
 </script>
 </body>
