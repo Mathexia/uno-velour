@@ -134,18 +134,118 @@ body{padding:12px 10px 80px}
 </head>
 <body>
 <div id="app"></div><button id="snd" class="ic" aria-label="Suara">♪</button>
+<script src="https://cdn.ably.com/lib/ably.min-2.js"></script>
 <script type="module">
 const $=s=>document.querySelector(s),app=$('#app');
 const lab=v=>({S:'⊘',R:'⇄',D:'+2',W:'✦',F:'+4'}[v]||v);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const CN={r:'Merah',y:'Kuning',g:'Hijau',b:'Biru'};
-const S={code:null,slot:null,tok:null,room:null,timer:null,tick:0,pick:null,v:0,dl:0,dur:30,seen:null,uno:0,gn:0,np:1,hide:0,lr:-1};
-async function api(b){
-  const r=await fetch('/api/room',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:S.code,slot:S.slot,tok:S.tok,...b})});
-  const d=await r.json().catch(()=>({error:'Respons server tidak valid'}));
-  if(!r.ok){const e=new Error(d.error||'Gagal');e.status=r.status;throw e}
-  return d}
-const go=async b=>{const d=await api(b);apply(d);clearTimeout(S.timer);poll()};
+// ====== ISI DENGAN API KEY ABLY KAMU ======
+const ABLY_KEY='1T0blg.woYYRA:u5l0dTBwnVg9Sz7vgrwTUeHcIrtAFufVq21zR53vBVU';
+// ==========================================
+const S={code:null,slot:null,room:null,pick:null,v:0,dl:0,dur:30,seen:null,uno:0,gn:0,np:1,hide:0,lr:-1,host:false,R:null,rt:null,ch:null,gh:null,lob:null,matched:false,jres:null,hostCid:null};
+const CID=sessionStorage.v_cid||(sessionStorage.v_cid=Math.random().toString(36).slice(2,10));
+
+// ===== Mesin game (dijalankan di browser pemilik room) =====
+const AL='ABCDEFGHJKLMNPQRSTUVWXYZ23456789',rc=()=>Array.from({length:4},()=>AL[Math.random()*AL.length|0]).join('');
+const shuffle=a=>{a=[...a];for(let i=a.length-1;i>0;i--){const j=Math.random()*(i+1)|0;[a[i],a[j]]=[a[j],a[i]]}return a};
+const mkDeck=()=>{const d=[];for(const c of'rygb'){d.push(c+'0');for(let v=1;v<=9;v++)d.push(c+v,c+v);for(const s of'SRD')d.push(c+s,c+s)}for(let i=0;i<4;i++)d.push('kW','kF');return shuffle(d)};
+const fail=m=>{throw new Error(m)};
+function setTurn(g){const h=g['h'+g.turn],t=g.disc[g.disc.length-1];g.dur=h.some(c=>c[0]==='k'||c[0]===g.color||c[1]===t[1])?30:10;g.dl=Date.now()+g.dur*1000}
+function startRound(R){
+  const n=R.hand,d=mkDeck(),h0=d.splice(0,n),h1=d.splice(0,n);
+  const top=d.splice(d.findIndex(c=>c[0]!=='k'&&/\d/.test(c[1])),1)[0],r=(R.g?.r||0)+1;
+  R.status='playing';
+  R.g={deck:d,disc:[top],h0,h1,color:top[0],turn:r%2?0:1,r,n:(R.g?.n||0)+1,uno:R.g?.uno||0,k:'s',by:-1,msg:'Ronde '+r+' dimulai'};
+  setTurn(R.g);R.p[0].ready=R.p[1].ready=false}
+function take(g,pl,n){const h=g['h'+pl];
+  for(let k=0;k<n;k++){if(!g.deck.length){const t=g.disc.pop();g.deck=shuffle(g.disc);g.disc=[t];if(!g.deck.length)break}h.push(g.deck.pop())}}
+function auto(R){const g=R.g,pl=g.turn;take(g,pl,1);g.turn=1-pl;g.n++;g.k='t';g.by=pl;g.msg=R.p[pl].n+' kehabisan waktu — kartu diambil otomatis';setTurn(g)}
+function hplay(R,me,b){
+  const g=R.g,op=1-me;if(R.status!=='playing'||g.turn!==me)fail('Bukan giliranmu');
+  const h=g['h'+me],i=+b.i,c=h[i],top=g.disc[g.disc.length-1];
+  if(!c)fail('Kartu tidak ada');
+  if(!(c[0]==='k'||c[0]===g.color||c[1]===top[1]))fail('Kartu tidak cocok');
+  if(c[0]==='k'&&!CN[b.col])fail('Pilih warna dulu');
+  h.splice(i,1);g.disc.push(c);g.color=c[0]==='k'?b.col:c[0];
+  const nm=R.p[me].n,on=R.p[op].n,v=c[1];let next=op,m=`${nm} main ${lab(v)}`;
+  if(v==='S'||v==='R'){next=me;m+=` — ${on} dilewati`}
+  if(v==='D'){take(g,op,2);next=me;m+=` — ${on} ambil 2`}
+  if(v==='F'){take(g,op,4);next=me;m+=` — ${on} ambil 4`}
+  if(c[0]==='k')m+=` (${CN[b.col]})`;
+  g.turn=next;g.msg=m;g.n++;g.k='p';g.by=me;
+  if(h.length<=1)g.uno=(g.uno||0)+1;
+  if(!h.length){g.win=me;g.msg=nm+' kehabisan kartu';R.status='over';R.p[me].w++}else setTurn(g)}
+function mkView(R,me){
+  const o={status:R.status,hand:R.hand,v:R.v,rand:!!R.rand,p:{}};
+  for(const i of[0,1])if(R.p[i])o.p[i]={n:R.p[i].n,ready:R.p[i].ready,w:R.p[i].w};
+  const g=R.g,op=1-me;
+  if(g){o.g={disc:[g.disc[g.disc.length-1]],color:g.color,turn:g.turn,msg:g.msg,win:g.win,r:g.r,n:g.n,k:g.k,by:g.by,uno:g.uno,dur:g.dur,left:g.dl-Date.now(),nd:g.deck.length,h:[...g['h'+me]],no:g['h'+op].length};
+    if(R.status==='over')o.g.oh=[...g['h'+op]]}
+  return o}
+function bcast(){const R=S.R;if(!R)return;R.v++;apply(mkView(R,0));if(R.p[1]&&S.gh)S.gh.publish('view',{to:R.p[1].cid,d:mkView(R,1)})}
+function hostAct(me,b){
+  const R=S.R;if(!R)return;
+  try{const A=b.act;
+    if(A==='hand'){const n=+b.n;if(me===0&&R.status==='lobby'&&n>=5&&n<=10)R.hand=n}
+    else if(A==='ready'){if(R.status==='lobby'&&R.p[1]){R.p[me].ready=!R.p[me].ready;if(R.p[0].ready&&R.p[1].ready)startRound(R)}}
+    else if(A==='play')hplay(R,me,b);
+    else if(A==='draw'){const g=R.g;if(R.status==='playing'&&g.turn===me){take(g,me,1);g.turn=1-me;g.msg=R.p[me].n+' mengambil kartu';g.n++;g.k='d';g.by=me;setTurn(g)}}
+    else if(A==='next'){if(me===0&&R.status==='over')startRound(R)}
+    else if(A==='leave'&&me===1&&R.status==='lobby')delete R.p[1];
+  }catch(e){}
+  bcast()}
+function onJoin(m){
+  const d=m.data,R=S.R;if(!R)return;
+  if(R.p[1]&&R.p[1].cid!==d.cid)return S.gh.publish('deny',{to:d.cid,m:'Room sudah penuh'});
+  if(!R.p[1]){if(R.status!=='lobby')return S.gh.publish('deny',{to:d.cid,m:'Room sedang main'});
+    R.p[1]={n:d.name,cid:d.cid,ready:false,w:0};if(R.rand)startRound(R)}
+  bcast()}
+
+// ===== Jaringan (Ably) =====
+const go=async b=>{if(S.host)hostAct(0,b);else await S.ch.publish('act',{cid:CID,...b})};
+const connect=()=>{if(!S.rt)S.rt=new Ably.Realtime({key:ABLY_KEY,clientId:CID})};
+function cleanup(){
+  for(const c of[S.ch,S.gh])if(c){c.unsubscribe();c.presence.unsubscribe();c.detach().catch(()=>{})}
+  S.ch=S.gh=null;S.R=null;S.host=false;S.code=null;S.room=null;S.jres=null}
+async function hostRoom(name,rand){
+  connect();const code=rc();
+  S.R={status:'lobby',hand:7,rand:!!rand,v:0,p:{0:{n:name,ready:false,w:0}}};
+  S.host=true;S.slot=0;S.code=code;S.ch=S.rt.channels.get('h:'+code);S.gh=S.rt.channels.get('g:'+code);
+  await S.ch.subscribe('join',onJoin);
+  await S.ch.subscribe('act',m=>{if(S.R?.p[1]&&m.data.cid===S.R.p[1].cid)hostAct(1,m.data)});
+  S.ch.presence.subscribe('leave',m=>{const R=S.R;if(R?.p[1]&&m.clientId===R.p[1].cid&&R.status==='lobby'){delete R.p[1];bcast()}});
+  await S.ch.presence.enter({role:'host'})}
+async function joinRoom(code,name){
+  connect();code=code.toUpperCase();S.host=false;S.slot=1;S.code=code;
+  S.ch=S.rt.channels.get('h:'+code);S.gh=S.rt.channels.get('g:'+code);
+  const first=new Promise((ok,no)=>{S.jres={ok,no}});
+  await S.gh.subscribe('view',m=>{if(m.data.to===CID){apply(m.data.d);S.jres?.ok()}});
+  await S.gh.subscribe('deny',m=>{if(m.data.to===CID)S.jres?.no(new Error(m.data.m))});
+  await S.gh.subscribe('closed',()=>roomClosed());
+  S.ch.presence.subscribe('leave',m=>{if(m.clientId===S.hostCid)roomClosed()});
+  const mem=await S.ch.presence.get(),h=mem.find(x=>x.data?.role==='host');
+  if(!h)throw new Error('Room tidak ditemukan');
+  S.hostCid=h.clientId;
+  await S.ch.presence.enter({role:'guest'});
+  await S.ch.publish('join',{cid:CID,name});
+  await Promise.race([first,new Promise((_,no)=>setTimeout(()=>no(new Error('Pemilik room tidak merespons')),6000))])}
+function begin(showCode){S.v=0;S.seen=null;S.hide=0;if(showCode)history.pushState(0,'','/r/'+S.code);S.host?bcast():view()}
+function roomClosed(){if(!S.code)return;toast('Pemilik room keluar, room ditutup');leave(true)}
+async function stopSeek(){S.matched=true;const L=S.lob;S.lob=null;if(L){L.unsubscribe();L.presence.unsubscribe();await L.presence.leave().catch(()=>{});L.detach().catch(()=>{})}}
+async function seek(n){
+  connect();const L=S.lob=S.rt.channels.get('v-lobby');S.matched=false;
+  await L.subscribe('invite',async m=>{
+    if(m.data.to!==CID||S.matched)return;S.matched=true;
+    try{await stopSeek();await joinRoom(m.data.code,n);begin(false)}catch(e){cleanup();home();toast(e.message)}});
+  const tryMatch=async()=>{
+    if(S.matched||!S.lob)return;
+    const mem=(await L.presence.get()).filter(x=>x.data?.seek).sort((a,b)=>a.clientId<b.clientId?-1:1);
+    const i=mem.findIndex(x=>x.clientId===CID);if(i<0||i%2||!mem[i+1])return;
+    S.matched=true;
+    try{await hostRoom(n,true);await L.publish('invite',{to:mem[i+1].clientId,code:S.code});await stopSeek();begin(false)}catch(e){cleanup();home();toast(e.message)}};
+  L.presence.subscribe('enter',tryMatch);L.presence.subscribe('leave',tryMatch);
+  await L.presence.enter({seek:1});tryMatch()}
 
 // ===== Audio (disintesis di browser, tanpa file) =====
 let AC,MG,MU,sil,mute=localStorage.v_mute==='1',mus=0,bi=0;
@@ -205,37 +305,19 @@ function home(msg){
   <div class="or">atau punya kode?</div>
   <div class="row"><input id="cd" maxlength="4" placeholder="••••" value="${pre}"><button class="btn sec" data-a="join">Gabung</button></div>
   ${pre?`<p style="text-align:center;color:var(--mut);font-size:13px">Kode ${pre} siap — isi nama lalu tekan Gabung.</p>`:''}
-  ${msg?`<div class="sk"></div><p style="text-align:center;color:var(--mut)">${msg}</p>`:''}</div>`;
+  ${msg?`<div class="sk"></div><p style="text-align:center;color:var(--mut)">${msg}</p>${msg.startsWith('Mencari')?'<button class="btn sec sm" data-a="stopseek">Batal</button>':''}`:''}</div>`;
   $('#cd').oninput=e=>e.target.value=e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,'');
 }
 
-function enter(code,slot,tok){
-  S.code=code;S.slot=slot;S.tok=tok;S.room=null;S.pick=null;S.v=0;S.seen=null;S.hide=0;
-  localStorage['v_'+code]=JSON.stringify([slot,tok]);history.pushState(0,'','/r/'+code);
-  app.innerHTML=`<div class="top"><div class="sk w30" style="height:48px"></div></div><div class="players"><div class="glass pl"><div class="sk w60"></div><div class="sk w40"></div></div><div class="glass pl"><div class="sk w60"></div><div class="sk w40"></div></div></div>`;
-  clearTimeout(S.timer);poll()}
 function apply(d){
-  if(!d||d.same||d.v===undefined||d.v<S.v)return;
+  if(!d||d.v===undefined||d.v<S.v)return;
   S.v=d.v;const me=S.slot,g=d.g;
   if(g){g.deck=Array(g.nd).fill(0);g['h'+(1-me)]=g.oh||Array(g.no).fill(0);g['h'+me]=g.h||[];S.dl=Date.now()+g.left;S.dur=g.dur||30}
   fx(d);if(d.status!=='over')S.hide=0;
   S.room=d;view()}
-async function poll(){
-  const c=S.code,id=++S.tick;if(!c)return;
-  let gap=0;
-  try{
-    const d=await api({act:'get',v:S.v,wait:S.v?5000:0});
-    if(c!==S.code||id!==S.tick)return;
-    apply(d)
-  }catch(e){
-    if(c!==S.code||id!==S.tick)return;
-    if(e.status===404||e.status===403){localStorage.removeItem('v_'+c);toast(S.slot===1?'Pemilik room keluar, room ditutup':'Room sudah ditutup');return leave(true)}
-    gap=1500}
-  S.timer=setTimeout(poll,gap)}
 async function leave(skip){
-  const c=S.code;clearTimeout(S.timer);S.tick++;
-  if(c&&!skip){api({act:'leave'}).catch(()=>{});if(S.room?.status==='lobby')localStorage.removeItem('v_'+c)}
-  S.code=null;S.room=null;history.pushState(0,'','/');home()}
+  if(S.code&&!skip){try{if(S.host)await S.gh.publish('closed',{});else await S.ch.publish('act',{cid:CID,act:'leave'})}catch(e){}}
+  cleanup();history.pushState(0,'','/');home()}
 // Timer: tampilan lokal; waktu habis ditegakkan server
 setInterval(()=>{
   const R=S.room,t=$('#tm');if(!R||!R.g||R.status!=='playing'||!t)return;
@@ -286,7 +368,7 @@ function play(i,col){
   if(!(c[0]==='k'||c[0]===g.color||c[1]===top[1]))return toast('Kartu tidak cocok');
   if(c[0]==='k'&&!col){S.pick=i;return view()}
   S.pick=null;sfx('card');g['h'+me].splice(i,1);g.disc=[c];g.color=c[0]==='k'?col:c[0];g.turn=-1;view();
-  return go({act:'play',i,col}).catch(e=>{toast(e.message);S.v=0;clearTimeout(S.timer);poll()})}
+  return go({act:'play',i,col})}
 
 app.onclick=async e=>{
   const t=e.target.closest('[data-a]');if(!t||t.disabled)return;
@@ -294,11 +376,12 @@ app.onclick=async e=>{
   try{
     if(start){
       const n=myName();if(!n)return toast('Isi nama dulu ya');
-      let c,sv;
-      if(a==='join'){c=$('#cd').value;if(c.length<4)return toast('Kode harus 4 karakter');sv=JSON.parse(localStorage['v_'+c]||'null')}
+      if(ABLY_KEY.startsWith('ISI'))return toast('Isi ABLY_KEY di index.html dulu');
       home(a==='join'?'Menyambungkan…':a==='create'?'Membuat room…':'Mencari lawan…');
-      const d=await api({act:a,name:n,code:c,slot:sv?.[0],tok:sv?.[1]});
-      return enter(d.code,d.slot,d.tok)}
+      if(a==='create'){await hostRoom(n,false);return begin(true)}
+      if(a==='join'){const c=$('#cd').value;if(c.length<4){home();return toast('Kode harus 4 karakter')}await joinRoom(c,n);return begin(true)}
+      return seek(n)}
+    if(a==='stopseek'){await stopSeek();return home()}
     if(a==='back')return leave();
     if(a==='share'){const u=location.origin+'/r/'+S.code;
       if(navigator.share)navigator.share({title:'Main Velour',text:'Gabung room '+S.code,url:u}).catch(()=>{});
@@ -308,16 +391,14 @@ app.onclick=async e=>{
     if(a==='play')return play(+t.dataset.i);
     if(a==='col')return play(S.pick,t.dataset.c);
     if(a==='cancel'){S.pick=null;return view()}
-    if(a==='draw'){sfx('draw');if(S.room?.g){S.room.g.turn=-1;view()}return go({act:'draw'}).catch(e=>{S.v=0;clearTimeout(S.timer);poll();throw e})}
+    if(a==='draw'){sfx('draw');if(S.room?.g){S.room.g.turn=-1;view()}return go({act:'draw'})}
     if(a==='next')return go({act:'next'});
     if(a==='hide'){S.hide=1;return view()}
     if(a==='show'){S.hide=0;return view()}
-  }catch(err){if(start)home();toast(err.message)}};
+  }catch(err){if(start){cleanup();home()}toast(err.message)}};
 
-const m=location.pathname.match(/^\/r\/([A-Za-z0-9]{4})/);
-const code=m&&m[1].toUpperCase();
-const sv=code&&JSON.parse(localStorage['v_'+code]||'null');
-sv?enter(code,sv[0],sv[1]):home();
+setInterval(()=>{const R=S.R;if(S.host&&R&&R.status==='playing'&&Date.now()>R.g.dl){auto(R);bcast()}},400);
+home();
 </script>
 </body>
 </html>
