@@ -124,17 +124,24 @@ export default async req => {
     }
     const code = String(b.code || '').toUpperCase(), me = +b.slot, tok = b.tok;
     if (A === 'get') {
-      let e = await st.getWithMetadata(code, {type: 'json'});
-      if (!e) return E('Room tidak ditemukan', 404);
-      if (e.data.p[me]?.tok !== tok) return E('Sesi tidak valid', 403);
-      if (e.data.status === 'playing' && Date.now() > e.data.g.dl + 700) {
-        await mutate(st, code, R => { if (R.status === 'playing' && Date.now() > R.g.dl + 700) auto(R) }).catch(() => {});
-        e = await st.getWithMetadata(code, {type: 'json'});
+      const t0 = Date.now(), wait = Math.min(+b.wait || 0, 5000);
+      for (;;) {
+        let e = await st.getWithMetadata(code, {type: 'json'});
         if (!e) return E('Room tidak ditemukan', 404);
+        if (e.data.p[me]?.tok !== tok) return E('Sesi tidak valid', 403);
+        if (e.data.status === 'playing' && Date.now() > e.data.g.dl + 700) {
+          await mutate(st, code, R => { if (R.status === 'playing' && Date.now() > R.g.dl + 700) auto(R) }).catch(() => {});
+          e = await st.getWithMetadata(code, {type: 'json'});
+          if (!e) return E('Room tidak ditemukan', 404);
+        }
+        if (+b.v !== e.data.v) return Response.json(view(e.data, me));
+        if (Date.now() - t0 >= wait) return Response.json({same: 1});
+        await new Promise(r => setTimeout(r, 350));
       }
-      return Response.json(+b.v === e.data.v ? {same: 1} : view(e.data, me));
     }
+    let RR;
     const out = await mutate(st, code, R => {
+      RR = R;
       if (R.p[me]?.tok !== tok) fail(403, 'Sesi tidak valid');
       if (A === 'hand') {
         const n = +b.n;
@@ -157,7 +164,7 @@ export default async req => {
       } else fail(400, 'Aksi tidak dikenal');
     });
     if (out === 'del') { await st.delete(code); const q = await st.get('queue'); if (q === code) await st.delete('queue') }
-    return Response.json({ok: 1});
+    return Response.json(out === 'del' ? {ok: 1} : view(RR, me));
   } catch (e) {
     return E(e.m || 'Terjadi kesalahan server', e.s || 500);
   }
