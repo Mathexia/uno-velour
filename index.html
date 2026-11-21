@@ -130,6 +130,36 @@ body{padding:12px 10px 80px}
 .tm{width:48px;height:48px;font-size:16px}
 .table{gap:16px}.code b{font-size:28px}
 }
+
+/* respons ala tombol iPhone */
+.btn,.chip,.ic,.col,.x,.card.ok,#snd{touch-action:manipulation;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}
+.btn,.chip,.ic,.x,#snd{transition:transform .35s cubic-bezier(.2,1.8,.4,1),filter .2s,box-shadow .3s,opacity .3s,background .2s}
+.btn:active,.chip:active:not(:disabled),.ic:active,.x:active,#snd:active{transform:scale(.93)!important;filter:brightness(.88);transition:transform .07s ease-out,filter .07s}
+.card.ok:active{transform:translateY(-6px) scale(.96)!important}
+/* kartu berubah warna saat disorot */
+.card.ok:hover,.card.ok:active{filter:brightness(1.22) saturate(1.5) hue-rotate(-10deg);border-color:rgba(255,255,255,.9)}
+/* kartu "per pemain" beda warna */
+.opt{background:linear-gradient(140deg,rgba(61,165,127,.26),rgba(61,165,127,.05));border-color:rgba(61,165,127,.4)}
+.opt label{color:#8fd9bd}
+.pl p.no{color:#ff6b6b;font-weight:700}
+.dng{background:linear-gradient(135deg,#ff8478,#d6403a);color:#fff;box-shadow:0 12px 30px -12px rgba(255,90,80,.6)}
+.ghost{background:transparent;border:1px solid rgba(255,255,255,.16);color:var(--mut)}
+/* kartu menang / kalah */
+.modal .res{position:relative;max-width:380px;width:100%;padding:34px 26px 26px;display:grid;gap:14px;text-align:center}
+.res .btn{width:100%}
+.medal{width:104px;height:104px;margin:0 auto;border-radius:50%;display:grid;place-items:center;font-size:54px;animation:medal .7s cubic-bezier(.3,1.6,.5,1) both}
+.win .medal{background:radial-gradient(circle at 30% 25%,rgba(255,236,170,.55),rgba(217,187,127,.12) 60%,transparent 72%);box-shadow:0 0 0 1px rgba(217,187,127,.45),0 0 60px rgba(217,187,127,.4)}
+.lose .medal{background:radial-gradient(circle at 30% 25%,rgba(255,150,140,.4),rgba(220,70,60,.1) 60%,transparent 72%);box-shadow:0 0 0 1px rgba(255,107,107,.4),0 0 50px rgba(255,90,80,.3)}
+.win h2{color:var(--gold)}.lose h2{color:#ff8a80}
+.res .sub{color:var(--mut)}.res .wait{color:var(--mut);font-size:14px;padding:12px}
+@keyframes medal{from{transform:scale(.3) rotate(-20deg);opacity:0}}
+/* HP: kartu tidak menumpuk, turun ke baris bawah */
+@media(max-width:600px){
+.card{--w:clamp(42px,calc((100vw - 60px)/5),66px)}
+.hand{flex-wrap:wrap;gap:8px;padding:16px 0 0;justify-content:center;overflow:visible}
+.hand .card,.hand .card:first-child{margin-left:0}
+.hand .card.ok:hover{transform:translateY(-8px) scale(1.04)}
+}
 </style>
 </head>
 <body>
@@ -192,7 +222,8 @@ function hostAct(me,b){
     else if(A==='play')hplay(R,me,b);
     else if(A==='draw'){const g=R.g;if(R.status==='playing'&&g.turn===me){take(g,me,1);g.turn=1-me;g.msg=R.p[me].n+' mengambil kartu';g.n++;g.k='d';g.by=me;setTurn(g)}}
     else if(A==='next'){if(me===0&&R.status==='over')startRound(R)}
-    else if(A==='leave'&&me===1&&R.status==='lobby')delete R.p[1];
+    else if(A==='leave'&&me===1&&R.status==='lobby'){delete R.p[1];R.p[0].w=0;R.p[0].ready=false;delete R.g}
+    else if(A==='lobby'){if(R.status!=='lobby'){R.status='lobby';R.p[0].ready=false;if(R.p[1])R.p[1].ready=false}}
   }catch(e){}
   bcast()}
 function onJoin(m){
@@ -217,7 +248,7 @@ async function hostRoom(name,rand){
   S.host=true;S.slot=0;S.code=code;S.ch=S.rt.channels.get('h:'+code);S.gh=S.rt.channels.get('g:'+code);
   await S.ch.subscribe('join',onJoin);
   await S.ch.subscribe('act',m=>{if(S.R?.p[1]&&m.data.cid===S.R.p[1].cid)hostAct(1,m.data)});
-  S.ch.presence.subscribe('leave',m=>{const R=S.R;if(R?.p[1]&&m.clientId===R.p[1].cid&&R.status==='lobby'){delete R.p[1];bcast()}});
+  S.ch.presence.subscribe('leave',m=>{const R=S.R;if(R?.p[1]&&m.clientId===R.p[1].cid&&R.status==='lobby'){delete R.p[1];R.p[0].w=0;R.p[0].ready=false;delete R.g;bcast()}});
   S.ch.presence.enter({role:'host'}).catch(()=>{})}
 async function joinRoom(code,name){
   connect();code=code.toUpperCase();S.host=false;S.slot=1;S.code=code;S.last=Date.now();
@@ -260,15 +291,13 @@ function tn(f,d,type='sine',v=.1,w=0,dest){const a=ac();if(a.state!=='running')r
   o.type=type;o.frequency.setValueAtTime(f,t);g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(v,t+.02);g.gain.exponentialRampToValueAtTime(.0001,t+d);
   o.connect(g).connect(dest||MG);o.start(t);o.stop(t+d+.05)}
 const CH=[[220,261.6,329.6],[174.6,220,261.6],[261.6,329.6,392],[196,246.9,293.7]];
-function bar(){mus=setTimeout(bar,6000);if(!AC||AC.state!=='running')return;const c=CH[bi++%4];tn(c[0],6,'sine',.12,0,MU);for(let k=0;k<8;k++)tn(c[k%3]*2,1.6,'triangle',.1,k*.75,MU)}
 function silentWav(){const n=8000,b=new DataView(new ArrayBuffer(44+n)),w=(o,s)=>[...s].forEach((c,i)=>b.setUint8(o+i,c.charCodeAt()));
   w(0,'RIFF');b.setUint32(4,36+n,true);w(8,'WAVEfmt ');b.setUint32(16,16,true);b.setUint16(20,1,true);b.setUint16(22,1,true);b.setUint32(24,8000,true);b.setUint32(28,8000,true);b.setUint16(32,1,true);b.setUint16(34,8,true);w(36,'data');b.setUint32(40,n,true);
   for(let i=0;i<n;i++)b.setUint8(44+i,128);return URL.createObjectURL(new Blob([b],{type:'audio/wav'}))}
 function unlock(){ac();
   if(!sil){sil=new Audio(silentWav());sil.loop=true;sil.setAttribute('playsinline','')}
   if(sil.paused)sil.play().catch(()=>{});
-  if(window.speechSynthesis&&!unlock.s){unlock.s=1;const u=new SpeechSynthesisUtterance(' ');u.volume=0;speechSynthesis.speak(u)}
-  if(!mus)bar()}
+  if(window.speechSynthesis&&!unlock.s){unlock.s=1;const u=new SpeechSynthesisUtterance(' ');u.volume=0;speechSynthesis.speak(u)}}
 function shout(){if(mute||!window.speechSynthesis)return;const u=new SpeechSynthesisUtterance('UNO!');u.pitch=1.5;u.rate=1.1;u.volume=1;u.lang='en-US';speechSynthesis.cancel();speechSynthesis.speak(u)}
 function flash(){const d=document.createElement('div');d.className='uf';d.textContent='UNO!';document.body.append(d);setTimeout(()=>d.remove(),1300)}
 function sfx(k){if(mute&&k!=='uno')return;if(!mute)ac();
@@ -276,11 +305,11 @@ function sfx(k){if(mute&&k!=='uno')return;if(!mute)ac();
    draw(){tn(300,.16,'sawtooth',.14);tn(210,.18,'sawtooth',.14,.07)},
    tick(){tn(1000,.06,'square',.09)},hot(){tn(1500,.08,'square',.14)},
    join(){tn(660,.22,'sine',.3);tn(880,.28,'sine',.25,.12)},
-   win(){[523,659,784,1047].forEach((f,i)=>tn(f,.45,'triangle',.3,i*.12))},
-   lose(){[392,330,262].forEach((f,i)=>tn(f,.55,'triangle',.3,i*.18))},
+   win(){[[0,.28],[.3,.28],[.6,1.3]].forEach(([w,d],i)=>{const ch=i<2?[261.6,329.6,392]:[523.3,659.3,784,1046.5];ch.forEach(f=>{tn(f,d,'sawtooth',.16,w);tn(f/2,d,'square',.1,w)})});setTimeout(shout,1100)},
+   lose(){[[392,0],[370,.4],[349,.8],[311,1.2]].forEach(([f,w],i)=>tn(f,i<3?.38:.9,'sawtooth',.2,w))},
    uno(){flash();if(!mute){[392,523,659].forEach((f,i)=>tn(f,.3,'sawtooth',.2,i*.07));shout()}}})[k]?.()}
 $('#snd').classList.toggle('off',mute);
-$('#snd').onclick=()=>{mute=!mute;localStorage.v_mute=mute?1:0;ac();MG.gain.value=mute?0:1.6;$('#snd').classList.toggle('off',mute);if(!mus)bar()};
+$('#snd').onclick=()=>{mute=!mute;localStorage.v_mute=mute?1:0;ac();MG.gain.value=mute?0:1.6;$('#snd').classList.toggle('off',mute)};
 ['pointerdown','touchend','keydown'].forEach(e=>addEventListener(e,unlock,{passive:true}));
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&AC)AC.resume().catch(()=>{})});
 
@@ -290,7 +319,7 @@ function fx(d){
   if(S.seen){
     if(np>S.np)sfx('join');
     if(g){
-      if(g.uno>S.uno)sfx('uno');
+      if(g.uno>S.uno&&d.status!=='over')sfx('uno');
       if(g.n!==S.gn){
         if(d.status==='over')sfx(g.win===me?'win':'lose');
         else if(g.by!==me||g.k==='t')sfx(g.k==='p'?'card':'draw')}}}
@@ -301,9 +330,9 @@ const myName=()=>{const n=($('#nm')?.value||localStorage.v_name||'').trim().slic
 
 function home(msg){
   const pre=(location.pathname.match(/^\/r\/([A-Za-z0-9]{4})/)||[])[1]?.toUpperCase()||'';
-  app.innerHTML=`<div class="brand"><h1>VELOUR</h1><p>UNO ONLINE · DUA PEMAIN · v4</p></div>
+  app.innerHTML=`<div class="brand"><h1>VELOUR</h1><p>UNO ONLINE · DUA PEMAIN</p></div>
   <div class="glass panel"><label for="nm">Nama panggilanmu</label>
-  <input id="nm" maxlength="14" placeholder="mis. Raka" value="${esc(localStorage.v_name||'')}" autocomplete="off">
+  <input id="nm" maxlength="14" placeholder="mis. Ghaniy" value="${esc(localStorage.v_name||'')}" autocomplete="off">
   <button class="btn pri" data-a="create">Buat room baru</button>
   <button class="btn sec" data-a="random">🎲 Cari lawan acak</button>
   <div class="or">atau punya kode?</div>
@@ -311,6 +340,7 @@ function home(msg){
   ${pre?`<p style="text-align:center;color:var(--mut);font-size:13px">Kode ${pre} siap — isi nama lalu tekan Gabung.</p>`:''}
   ${msg?`<div class="sk"></div><p style="text-align:center;color:var(--mut)">${msg}</p>${msg.startsWith('Mencari')?'<button class="btn sec sm" data-a="stopseek">Batal</button>':''}`:''}</div>`;
   $('#cd').oninput=e=>e.target.value=e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,'');
+  $('#cd').onkeydown=e=>{if(e.key==='Enter'&&e.target.value.length===4){e.preventDefault();app.querySelector('[data-a=join]').click()}};
 }
 
 function apply(d){
@@ -333,12 +363,12 @@ setInterval(()=>{
 function view(){const R=S.room;if(!R)return;R.status==='lobby'?lobby(R):game(R)}
 
 function lobby(R){
-  const me=S.slot,host=me===0,p=R.p||{},P=[p[0],p[1]],opp=P[1-me],rd=R.rand;
+  const me=S.slot,host=me===0,p=R.p||{},P=[p[0],p[1]],opp=P[1-me],rd=R.rand,wt=rd&&!opp;
   app.innerHTML=`<div class="top"><button class="ic" data-a="back">←</button><div class="code"><small>${rd?'MODE':'KODE ROOM'}</small><b ${rd?'style="font-size:24px;letter-spacing:.12em"':''}>${rd?'LAWAN ACAK':S.code}</b></div>${rd?'<span style="width:48px"></span>':'<button class="btn sec sm" data-a="share">Bagikan</button>'}</div>
-  <section class="players">${[0,1].map(i=>P[i]?`<div class="glass pl ${i===me?'me':''}"><h3>${esc(P[i].n)}${i===me?'<i>kamu</i>':''}</h3><p class="${P[i].ready?'ok':''}">${P[i].ready?'siap':rd?'bergabung':'belum siap'}</p><span>${P[i].w||0} menang</span></div>`:`<div class="glass pl"><div class="sk w60"></div><div class="sk w40"></div><div class="sk w30"></div></div>`).join('')}</section>
-  ${rd?`<div class="glass opt"><label>Mencari lawan…</label><small>Game dimulai otomatis begitu lawan ditemukan · 7 kartu per pemain.</small></div>`:
+  <section class="players">${[0,1].map(i=>P[i]?`<div class="glass pl ${i===me?'me':''}"><h3>${esc(P[i].n)}${i===me?'<i>kamu</i>':''}</h3><p class="${P[i].ready?'ok':'no'}">${P[i].ready?'siap':'belum siap'}</p><span>${P[i].w||0} menang</span></div>`:`<div class="glass pl"><div class="sk w60"></div><div class="sk w40"></div><div class="sk w30"></div></div>`).join('')}</section>
+  ${wt?`<div class="glass opt"><label>Mencari lawan…</label><small>Game dimulai otomatis begitu lawan ditemukan · 7 kartu per pemain.</small></div>`:
   `<div class="glass opt"><label>Kartu per pemain</label><div class="chips">${[5,6,7,8,9,10].map(n=>`<button class="chip ${R.hand==n?'on':''}" data-a="hand" data-n="${n}" ${host?'':'disabled'}>${n}</button>`).join('')}</div>${host?'':'<small>Hanya pembuat room yang bisa mengubah jumlah kartu.</small>'}</div>
-  <button class="btn pri" style="width:100%" data-a="ready" ${opp?'':'disabled'}>${P[me]?.ready?'Batal siap':opp?'Siap main':'Menunggu lawan…'}</button>`}`}
+  <button class="btn ${P[me]?.ready?'dng':'pri'}" style="width:100%" data-a="ready" ${opp?'':'disabled'}>${P[me]?.ready?'Batal siap':opp?'Siap main':'Menunggu lawan…'}</button>`}`}
 
 function game(R){
   const g=R.g,me=S.slot,op=1-me,p=R.p,mine=g['h'+me]||[],oh=g['h'+op]||[],top=g.disc[g.disc.length-1];
@@ -348,7 +378,7 @@ function game(R){
   const ms=Math.max(0,S.dl-Date.now()),rem=Math.ceil(ms/1000);
   const bn=live?(my?(can?'Giliranmu — pilih kartu':'Kamu tidak punya kartu yang cocok — silakan ambil kartu'):'Menunggu '+esc(p[op].n)+'…'):(won?'Kamu menang':'Kamu kalah');
   const res=won?'Kamu menang':'Kamu kalah';
-  app.innerHTML=`<div class="top gtop"><button class="ic" data-a="back">←</button>
+  app.innerHTML=`<div class="top gtop"><button class="ic" data-a="lobby">←</button>
   <div class="glass score"><div class="sd me"><small>${esc(p[me].n)}</small><em>${p[me].w||0}</em></div><span style="color:var(--mut)">:</span><div class="sd op"><em>${p[op].w||0}</em><small>${esc(p[op].n)}</small></div></div>
   <div class="tm ${live&&rem<=5?'hot':''} ${my?'mine':''}" id="tm" style="--p:${live?Math.min(100,ms/(S.dur*10)):0}"><span>${live?rem:'–'}</span></div></div>
   <div class="glass banner ${my?'me':''}">${bn}</div>
@@ -363,8 +393,13 @@ function game(R){
   <div class="hand">${mine.map((c,i)=>cd(c,my?(ok(c)?'ok':'no'):'',`data-a="play" data-i="${i}"`)).join('')}</div>
   ${!live&&S.hide?`<div class="glass resbar"><b>${res}</b><button class="btn sec sm" data-a="show">Lihat hasil</button>${me===0?'<button class="btn pri sm" data-a="next">Ronde berikutnya</button>':''}</div>`:''}
   ${S.pick!=null?`<div class="modal"><div class="glass"><h2>Pilih warna</h2><div class="cols">${'rygb'.split('').map(c=>`<button class="col" style="--c:var(--${c})" data-a="col" data-c="${c}" aria-label="${CN[c]}"></button>`).join('')}</div><button class="btn sec sm" data-a="cancel">Batal</button></div></div>`:''}
-  ${!live&&!S.hide?`<div class="modal"><div class="glass"><button class="x" data-a="hide" aria-label="Tutup">✕</button><h2>${res}</h2><div class="score" style="justify-content:center"><div class="sd me"><em>${p[me].w||0}</em></div><span>:</span><div class="sd op"><em>${p[op].w||0}</em></div></div>
-  ${me===0?'<button class="btn pri" data-a="next">Ronde berikutnya</button>':'<div class="sk"></div><p style="color:var(--mut)">Menunggu host memulai ronde baru…</p>'}</div></div>`:''}`}
+  ${!live&&!S.hide?`<div class="modal"><div class="glass res ${won?'win':'lose'}"><button class="x" data-a="hide" aria-label="Tutup">✕</button>
+  <div class="medal">${won?'🏆':'😵'}</div><h2>${won?'Kamu menang!':'Kamu kalah'}</h2>
+  <p class="sub">${won?'Kamu menghabiskan kartumu duluan!':esc(p[g.win].n)+' menghabiskan kartunya duluan!'}</p>
+  <div class="score" style="justify-content:center"><div class="sd me"><small>${esc(p[me].n)}</small><em>${p[me].w||0}</em></div><span style="color:var(--mut)">:</span><div class="sd op"><em>${p[op].w||0}</em><small>${esc(p[op].n)}</small></div></div>
+  ${me===0?'<button class="btn pri" data-a="next">Ronde berikutnya</button>':'<div class="wait">Menunggu pemilik room memulai ronde baru…</div>'}
+  <button class="btn sec" data-a="shareres">Bagikan hasil</button>
+  <button class="btn ghost" data-a="lobby">Kembali ke lobby</button></div></div>`:''}`}
 
 function play(i,col){
   const R=S.room,g=R.g,me=S.slot,c=(g['h'+me]||[])[i],top=g.disc[0];
@@ -388,6 +423,10 @@ app.onclick=async e=>{
       return seek(n)}
     if(a==='stopseek'){await stopSeek();return home()}
     if(a==='back')return leave();
+    if(a==='lobby')return go({act:'lobby'});
+    if(a==='shareres'){const R=S.room,me=S.slot,op=1-me,txt=`Velour UNO — ${R.p[me].n} ${R.p[me].w||0} : ${R.p[op].w||0} ${R.p[op].n}`;
+      if(navigator.share)navigator.share({title:'Velour UNO',text:txt,url:location.origin}).catch(()=>{});
+      else{await navigator.clipboard.writeText(txt+' '+location.origin);toast('Hasil disalin')}return}
     if(a==='share'){const u=location.origin+'/r/'+S.code;
       if(navigator.share)navigator.share({title:'Main Velour',text:'Gabung room '+S.code,url:u}).catch(()=>{});
       else{await navigator.clipboard.writeText(u);toast('Link disalin')}return}
