@@ -377,9 +377,10 @@ app.onclick=async e=>{
     if(start){
       const n=myName();if(!n)return toast('Isi nama dulu ya');
       if(ABLY_KEY.startsWith('ISI'))return toast('Isi ABLY_KEY di index.html dulu');
+      const c0=a==='join'?$('#cd').value:'';
       home(a==='join'?'Menyambungkan…':a==='create'?'Membuat room…':'Mencari lawan…');
       if(a==='create'){await hostRoom(n,false);return begin(true)}
-      if(a==='join'){const c=$('#cd').value;if(c.length<4){home();return toast('Kode harus 4 karakter')}await joinRoom(c,n);return begin(true)}
+      if(a==='join'){if(c0.length<4){home();return toast('Kode harus 4 karakter')}await joinRoom(c0,n);return begin(true)}
       return seek(n)}
     if(a==='stopseek'){await stopSeek();return home()}
     if(a==='back')return leave();
