@@ -10,12 +10,26 @@ const TTL = 6 * 3600e3;
 const E = (m, s = 400) => Response.json({error: m}, {status: s});
 const fail = (s, m) => { throw {s, m} };
 
+function setTurn(g) {
+  const h = g['h' + g.turn], t = g.disc.at(-1);
+  g.dur = h.some(c => c[0] === 'k' || c[0] === g.color || c[1] === t[1]) ? 30 : 10;
+  g.dl = Date.now() + g.dur * 1000;
+}
+
 function startRound(R) {
   const n = R.hand, d = mkDeck(), h0 = d.splice(0, n), h1 = d.splice(0, n);
   const top = d.splice(d.findIndex(c => c[0] !== 'k' && /\d/.test(c[1])), 1)[0], r = (R.g?.r || 0) + 1;
   R.status = 'playing';
-  R.g = {deck: d, disc: [top], h0, h1, color: top[0], turn: r % 2 ? 0 : 1, r, msg: 'Ronde ' + r + ' dimulai'};
+  R.g = {deck: d, disc: [top], h0, h1, color: top[0], turn: r % 2 ? 0 : 1, r, n: (R.g?.n || 0) + 1, uno: R.g?.uno || 0, k: 's', by: -1, msg: 'Ronde ' + r + ' dimulai'};
+  setTurn(R.g);
   R.p[0].ready = R.p[1].ready = false;
+}
+
+function auto(R) {
+  const g = R.g, pl = g.turn;
+  take(g, pl, 1); g.turn = 1 - pl; g.n++; g.k = 't'; g.by = pl;
+  g.msg = R.p[pl].n + ' kehabisan waktu — kartu diambil otomatis';
+  setTurn(g);
 }
 
 function take(g, pl, n) {
@@ -40,16 +54,21 @@ function play(R, me, b) {
   if (v === 'D') { take(g, op, 2); next = me; m += ` — ${on} ambil 2` }
   if (v === 'F') { take(g, op, 4); next = me; m += ` — ${on} ambil 4` }
   if (c[0] === 'k') m += ` (${CN[b.col]})`;
-  g.turn = next; g.msg = m;
+  g.turn = next; g.msg = m; g.n++; g.k = 'p'; g.by = me;
+  if (h.length <= 1) g.uno = (g.uno || 0) + 1;
   if (!h.length) { g.win = me; g.msg = nm + ' kehabisan kartu'; R.status = 'over'; R.p[me].w++ }
+  else setTurn(g);
 }
 
-// Kartu lawan tidak pernah dikirim ke klien — hanya jumlahnya.
+// Kartu lawan tidak dikirim saat game berjalan; baru dibuka setelah ronde selesai.
 function view(R, me) {
-  const o = {status: R.status, hand: R.hand, v: R.v, p: {}};
+  const o = {status: R.status, hand: R.hand, v: R.v, rand: !!R.rand, p: {}};
   for (const i of [0, 1]) if (R.p[i]) o.p[i] = {n: R.p[i].n, ready: R.p[i].ready, w: R.p[i].w};
-  const g = R.g;
-  if (g) o.g = {disc: [g.disc.at(-1)], color: g.color, turn: g.turn, msg: g.msg, win: g.win, r: g.r, nd: g.deck.length, h: g['h' + me], no: g['h' + (1 - me)].length};
+  const g = R.g, op = 1 - me;
+  if (g) {
+    o.g = {disc: [g.disc.at(-1)], color: g.color, turn: g.turn, msg: g.msg, win: g.win, r: g.r, n: g.n, k: g.k, by: g.by, uno: g.uno, dur: g.dur, left: g.dl - Date.now(), nd: g.deck.length, h: g['h' + me], no: g['h' + op].length};
+    if (R.status === 'over') o.g.oh = g['h' + op];
+  }
   return o;
 }
 
@@ -67,11 +86,11 @@ async function mutate(st, code, fn) {
   fail(409, 'Server sibuk, coba lagi');
 }
 
-async function create(st, name) {
+async function create(st, name, rand) {
   const tok = rnd(20, TK); let code;
   for (;;) {
     code = rnd(4);
-    const r = await st.setJSON(code, {t: Date.now(), v: 1, status: 'lobby', hand: 7, p: {0: {n: name, tok, ready: false, w: 0}}}, {onlyIfNew: true});
+    const r = await st.setJSON(code, {t: Date.now(), v: 1, status: 'lobby', hand: 7, rand: !!rand, p: {0: {n: name, tok, ready: false, w: 0}}}, {onlyIfNew: true});
     if (r?.modified !== false) break;
   }
   return {code, slot: 0, tok};
@@ -83,6 +102,7 @@ function join(st, code, name, b) {
     for (const i of [0, 1]) if (R.p[i] && b.tok && R.p[i].tok === b.tok) return {code, slot: i, tok: b.tok};
     if (R.status !== 'lobby' || R.p[1]) fail(409, 'Room sudah penuh / sedang main');
     R.p[1] = {n: name, tok, ready: false, w: 0};
+    if (R.rand) startRound(R);
     return {code, slot: 1, tok};
   });
 }
@@ -99,14 +119,19 @@ export default async req => {
       if (A === 'join') return Response.json(await join(st, String(b.code || '').toUpperCase(), name, b));
       const q = await st.get('queue');
       if (q) { try { const d = await join(st, q, name, {}); await st.delete('queue'); return Response.json(d) } catch {} }
-      const d = await create(st, name); await st.set('queue', d.code);
+      const d = await create(st, name, true); await st.set('queue', d.code);
       return Response.json(d);
     }
     const code = String(b.code || '').toUpperCase(), me = +b.slot, tok = b.tok;
     if (A === 'get') {
-      const e = await st.getWithMetadata(code, {type: 'json'});
+      let e = await st.getWithMetadata(code, {type: 'json'});
       if (!e) return E('Room tidak ditemukan', 404);
       if (e.data.p[me]?.tok !== tok) return E('Sesi tidak valid', 403);
+      if (e.data.status === 'playing' && Date.now() > e.data.g.dl + 700) {
+        await mutate(st, code, R => { if (R.status === 'playing' && Date.now() > R.g.dl + 700) auto(R) }).catch(() => {});
+        e = await st.getWithMetadata(code, {type: 'json'});
+        if (!e) return E('Room tidak ditemukan', 404);
+      }
       return Response.json(+b.v === e.data.v ? {same: 1} : view(e.data, me));
     }
     const out = await mutate(st, code, R => {
@@ -123,12 +148,12 @@ export default async req => {
       else if (A === 'draw') {
         const g = R.g;
         if (R.status !== 'playing' || g.turn !== me) fail(409, 'Bukan giliranmu');
-        take(g, me, 1); g.turn = 1 - me; g.msg = R.p[me].n + ' mengambil kartu';
+        take(g, me, 1); g.turn = 1 - me; g.msg = R.p[me].n + ' mengambil kartu'; g.n++; g.k = 'd'; g.by = me; setTurn(g);
       } else if (A === 'next') {
         if (me !== 0 || R.status !== 'over') fail(400, 'Tidak bisa memulai ronde');
         startRound(R);
       } else if (A === 'leave') {
-        if (R.status === 'lobby') { if (me === 1) delete R.p[1]; else return 'del' }
+        if (me === 0) return 'del'; if (R.status === 'lobby') delete R.p[1];
       } else fail(400, 'Aksi tidak dikenal');
     });
     if (out === 'del') { await st.delete(code); const q = await st.get('queue'); if (q === code) await st.delete('queue') }
