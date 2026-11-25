@@ -181,6 +181,12 @@ body::after{background:radial-gradient(circle,#85652b 0,transparent 62%)}
 .mb:active{transform:scale(.88)}
 .kick{margin-top:8px;padding:7px 14px;border-radius:999px;border:1px solid rgba(255,107,107,.45);background:rgba(255,107,107,.12);color:#ff8a80;font:700 12px Manrope;cursor:pointer;touch-action:manipulation;transition:transform .3s cubic-bezier(.2,1.8,.4,1)}
 .kick:active{transform:scale(.92)}
+
+.rt{display:flex;gap:8px;align-items:center}
+.pzi{display:inline-flex;gap:4px}.pzi i{display:block;width:4px;height:15px;background:currentColor;border-radius:2px}
+.pzi.big i{width:9px;height:34px;border-radius:4px}
+.pause .medal{background:rgba(255,255,255,.08);box-shadow:0 0 0 1px rgba(255,255,255,.2)}
+.wait.okk{color:var(--g)}.wait.nok{color:#ff6b6b}
 </style>
 </head>
 <body>
@@ -202,9 +208,9 @@ const AL='ABCDEFGHJKLMNPQRSTUVWXYZ23456789',rc=()=>Array.from({length:4},()=>AL[
 const shuffle=a=>{a=[...a];for(let i=a.length-1;i>0;i--){const j=Math.random()*(i+1)|0;[a[i],a[j]]=[a[j],a[i]]}return a};
 const mkDeck=()=>{const d=[];for(const c of'rygb'){d.push(c+'0');for(let v=1;v<=9;v++)d.push(c+v,c+v);for(const s of'SRD')d.push(c+s,c+s)}for(let i=0;i<4;i++)d.push('kW','kF');return shuffle(d)};
 const fail=m=>{throw new Error(m)};
-const BAN=['mntn','ptri','ainayah','arifah','arfh','ptry','ainyh','ainyyh','jnck','bngst','bgst'],EXACT=['cok','asu','anj','anjg','ajg'];
+const BAN=['mntn','ptri','ainayah','arifah','arfh','ptry','ainyh','ainyyh','jnck','bngst','bgst','putri','putry','blkn','frly','ghny','dewi'],SHORT=['dwi','dw','dew'],EXACT=['cok','asu','anj','anjg','ajg'];
 const bad=n=>{n=String(n).toLowerCase();const s=n.replace(/[^a-z]/g,''),tk=n.split(/[^a-z]+/).filter(Boolean);
-  return !/[\p{L}\p{N}]/u.test(n)||BAN.some(w=>s.includes(w))||EXACT.some(w=>s===w||tk.includes(w))};
+  return !/[\p{L}\p{N}]/u.test(n)||BAN.some(w=>s.includes(w))||SHORT.some(w=>tk.some(x=>x.includes(w)))||EXACT.some(w=>s===w||tk.includes(w))};
 const NOPE='Nama tidak dapat digunakan. Gunakan nama lain.';
 const okc=(c,h,col,t)=>c[0]==='k'?(c[1]!=='F'||!h.some(x=>x[0]===col)):(c[0]===col||c[1]===t[1]);
 function setTurn(g){const h=g['h'+g.turn],t=g.disc[g.disc.length-1];g.dur=h.some(c=>okc(c,h,g.color,t))?30:10;g.dl=Date.now()+g.dur*1000}
@@ -212,13 +218,16 @@ function startRound(R){
   const n=R.hand,d=mkDeck(),h0=d.splice(0,n),h1=d.splice(0,n);
   const top=d.splice(d.findIndex(c=>c[0]!=='k'&&/\d/.test(c[1])),1)[0],r=(R.g?.r||0)+1;
   R.status='playing';
-  R.g={deck:d,disc:[top],h0,h1,color:top[0],turn:r%2?0:1,r,n:(R.g?.n||0)+1,uno:R.g?.uno||0,k:'s',by:-1,msg:'Ronde '+r+' dimulai'};
+  R.g={deck:d,disc:[top],h0,h1,color:top[0],turn:r%2?0:1,r,n:(R.g?.n||0)+1,uno:R.g?.uno||0,k:'s',by:-1,to:[0,0],msg:'Ronde '+r+' dimulai'};
   setTurn(R.g);R.p[0].ready=R.p[1].ready=false}
 function take(g,pl,n){const h=g['h'+pl];
   for(let k=0;k<n;k++){if(!g.deck.length){const t=g.disc.pop();g.deck=shuffle(g.disc);g.disc=[t];if(!g.deck.length)break}h.push(g.deck.pop())}}
-function auto(R){const g=R.g,pl=g.turn;take(g,pl,1);g.turn=1-pl;g.n++;g.k='t';g.by=pl;g.msg=R.p[pl].n+' kehabisan waktu — kartu diambil otomatis';setTurn(g)}
+function auto(R){
+  const g=R.g,pl=g.turn;take(g,pl,1);g.n++;g.by=pl;g.to[pl]=(g.to[pl]||0)+1;
+  if(g.to[pl]>=3){g.k='f';g.win=1-pl;g.msg=R.p[pl].n+' tidak aktif — dianggap offline, permainan berakhir';R.status='over';R.p[1-pl].w++;R.dead=true;return}
+  g.turn=1-pl;g.k='t';g.msg=R.p[pl].n+' kehabisan waktu — kartu diambil otomatis';setTurn(g)}
 function hplay(R,me,b){
-  const g=R.g,op=1-me;if(R.status!=='playing'||g.turn!==me)fail('Bukan giliranmu');
+  const g=R.g,op=1-me;if(R.status!=='playing'||g.turn!==me||g.pz!==undefined)fail('Bukan giliranmu');g.to[me]=0;
   const h=g['h'+me],i=+b.i,c=h[i],top=g.disc[g.disc.length-1];
   if(!c)fail('Kartu tidak ada');
   if(!okc(c,h,g.color,top))fail('Kartu tidak cocok');
@@ -233,20 +242,23 @@ function hplay(R,me,b){
   if(h.length<=1)g.uno=(g.uno||0)+1;
   if(!h.length){g.win=me;g.msg=nm+' kehabisan kartu';R.status='over';R.p[me].w++}else setTurn(g)}
 function mkView(R,me){
-  const o={status:R.status,hand:R.hand,v:R.v,rand:!!R.rand,p:{}};
+  const o={status:R.status,hand:R.hand,v:R.v,rand:!!R.rand,dead:!!R.dead,p:{}};
   for(const i of[0,1])if(R.p[i])o.p[i]={n:R.p[i].n,ready:R.p[i].ready,w:R.p[i].w};
   const g=R.g,op=1-me;
-  if(g){o.g={disc:[g.disc[g.disc.length-1]],color:g.color,turn:g.turn,msg:g.msg,win:g.win,r:g.r,n:g.n,k:g.k,by:g.by,uno:g.uno,dur:g.turn===me?g.dur:30,left:g.dl-Date.now(),nd:g.deck.length,h:[...g['h'+me]],no:g['h'+op].length};
+  if(g){o.g={disc:[g.disc[g.disc.length-1]],color:g.color,turn:g.turn,msg:g.msg,win:g.win,r:g.r,n:g.n,k:g.k,by:g.by,uno:g.uno,dur:g.turn===me?g.dur:30,left:g.pz!==undefined?g.pl:g.dl-Date.now(),pz:g.pz,nd:g.deck.length,h:[...g['h'+me]],no:g['h'+op].length};
     if(R.status==='over')o.g.oh=[...g['h'+op]]}
   return o}
 function bcast(){const R=S.R;if(!R)return;R.v++;apply(mkView(R,0));if(R.p[1]&&S.gh)S.gh.publish('view',{to:R.p[1].cid,from:CID,d:mkView(R,1)})}
 function hostAct(me,b){
   const R=S.R;if(!R)return;
+  if(R.dead&&b.act!=='leave'){bcast();return}
   try{const A=b.act;
     if(A==='hand'){const n=+b.n;if(me===0&&R.status==='lobby'&&n>=5&&n<=10)R.hand=n}
-    else if(A==='ready'){if(R.status==='lobby'&&R.p[1]){R.p[me].ready=!R.p[me].ready;if(R.p[0].ready&&R.p[1].ready)startRound(R)}}
+    else if(A==='ready'){if((R.status==='lobby'||R.status==='over')&&R.p[1]){R.p[me].ready=!R.p[me].ready;if(R.p[0].ready&&R.p[1].ready)startRound(R)}}
     else if(A==='play')hplay(R,me,b);
-    else if(A==='draw'){const g=R.g;if(R.status==='playing'&&g.turn===me){take(g,me,1);g.turn=1-me;g.msg=R.p[me].n+' mengambil kartu';g.n++;g.k='d';g.by=me;setTurn(g)}}
+    else if(A==='pause'){const g=R.g;if(R.status==='playing'&&g.pz===undefined){g.pz=me;g.pl=Math.max(0,g.dl-Date.now());g.pt=Date.now()}}
+    else if(A==='resume'){const g=R.g;if(R.status==='playing'&&g.pz===me){g.dl=Date.now()+g.pl;delete g.pz}}
+    else if(A==='draw'){const g=R.g;if(R.status==='playing'&&g.turn===me&&g.pz===undefined){g.to[me]=0;take(g,me,1);g.turn=1-me;g.msg=R.p[me].n+' mengambil kartu';g.n++;g.k='d';g.by=me;setTurn(g)}}
     else if(A==='next'){if(me===0&&R.status==='over')startRound(R)}
     else if(A==='leave'&&me===1&&R.status==='lobby'){delete R.p[1];R.p[0].w=0;R.p[0].ready=false;delete R.g}
     else if(A==='lobby'){if(R.status!=='lobby'){R.status='lobby';R.p[0].ready=false;if(R.p[1])R.p[1].ready=false}}
@@ -257,6 +269,7 @@ function hostAct(me,b){
 function onJoin(m){
   const d=m.data,R=S.R;if(!R)return;
   if(bad(d.name))return S.gh.publish('deny',{to:d.cid,m:NOPE});
+  if(R.dead)return S.gh.publish('deny',{to:d.cid,m:'Room sudah berakhir'});
   if((R.banned||[]).includes(d.cid))return S.gh.publish('deny',{to:d.cid,m:'Kamu dikeluarkan dari room ini'});
   if(R.p[1]&&R.p[1].cid!==d.cid)return S.gh.publish('deny',{to:d.cid,m:'Room sudah penuh'});
   if(!R.p[1]){if(R.status!=='lobby')return S.gh.publish('deny',{to:d.cid,m:'Room sedang main'});
@@ -337,6 +350,7 @@ function say(txt,done){
   const u=new SpeechSynthesisUtterance(txt),m=pickMale();if(m)u.voice=m;
   u.lang='en-US';u.pitch=m?0.9:0.55;u.rate=1.05;u.volume=1;u.onend=f;u.onerror=f;
   setTimeout(f,2600);speechSynthesis.cancel();speechSynthesis.speak(u)}
+function endSeq(won){S.hold=true;flash();let c=0;const fin=()=>{if(++c>=2){S.hold=false;if(S.room?.status==='over')view()}};setTimeout(fin,1300);say('UNO game!',()=>{(won?fan:sad)();fin()})}
 function fan(){[[0,.28],[.3,.28],[.6,1.3]].forEach(([w,d],i)=>{const ch=i<2?[261.6,329.6,392]:[523.3,659.3,784,1046.5];ch.forEach(f=>{tn(f,d,'sawtooth',.16,w);tn(f/2,d,'square',.1,w)})})}
 function sad(){[[392,0],[370,.4],[349,.8],[311,1.2]].forEach(([f,w],i)=>tn(f,i<3?.38:.9,'sawtooth',.2,w))}
 function flash(){const d=document.createElement('div');d.className='uf';d.textContent='UNO!';document.body.append(d);setTimeout(()=>d.remove(),1300)}
@@ -362,7 +376,7 @@ function fx(d){
     if(g){
       if(g.uno>S.uno&&d.status!=='over')sfx('uno');
       if(g.n!==S.gn){
-        if(d.status==='over')sfx(g.win===me?'win':'lose');
+        if(d.status==='over'){if(g.k==='f')(g.win===me?fan:sad)();else endSeq(g.win===me)}
         else if(g.by!==me||g.k==='t')sfx(g.k==='p'?'card':'draw')}}}
   const orx=!!d.p[1-me]?.ready;if(S.seen&&orx&&!S.or)sfx('oready');S.or=orx;
   S.seen=1;S.np=np;if(g){S.uno=g.uno||0;S.gn=g.n}}
@@ -389,14 +403,14 @@ function apply(d){
   if(!d||d.v===undefined||d.v<S.v)return;
   S.v=d.v;const me=S.slot,g=d.g;
   if(g){g.deck=Array(g.nd).fill(0);g['h'+(1-me)]=g.oh||Array(g.no).fill(0);g['h'+me]=g.h||[];S.dl=Date.now()+g.left;S.dur=g.dur||30}
-  fx(d);if(d.status!=='over')S.hide=0;
+  fx(d);if(d.status!=='over'){S.hide=0;S.hold=false}
   S.room=d;if(d.status!=='lobby')S.edit=false;if(S.edit&&document.activeElement?.id==='rn')return;view()}
 async function leave(skip){
   if(S.code&&!skip){try{if(S.host)await S.gh.publish('closed',{});else await S.ch.publish('act',{cid:CID,act:'leave'})}catch(e){}}
   cleanup();history.pushState(0,'','/');home()}
 // Timer: tampilan lokal; waktu habis ditegakkan server
 setInterval(()=>{
-  const R=S.room,t=$('#tm');if(!R||!R.g||R.status!=='playing'||!t)return;
+  const R=S.room,t=$('#tm');if(!R||!R.g||R.status!=='playing'||R.g.pz!==undefined||!t)return;
   const ms=Math.max(0,S.dl-Date.now()),rem=Math.ceil(ms/1000),my=R.g.turn===S.slot;
   if(my){t.querySelector('span').textContent=rem;t.style.setProperty('--p',ms/(S.dur*10));t.classList.toggle('hot',rem<=5)}
   if(rem!==S.lr){S.lr=rem;if(rem>0&&(my||rem<=5))sfx(rem<=5?'hot':'tick')}},250);
@@ -405,7 +419,7 @@ function view(){const R=S.room;if(!R)return;R.status==='lobby'?lobby(R):game(R)}
 
 function lobby(R){
   const me=S.slot,host=me===0,p=R.p||{},P=[p[0],p[1]],opp=P[1-me],rd=R.rand,wt=rd&&!opp;
-  app.innerHTML=`<div class="top"><button class="ic" data-a="back">←</button><div class="code"><small>${rd?'MODE':'KODE ROOM'}</small><b ${rd?'style="font-size:24px;letter-spacing:.12em"':''}>${rd?'LAWAN ACAK':S.code}</b></div>${rd?'<span style="width:48px"></span>':'<button class="btn sec sm" data-a="share">Bagikan</button>'}</div>
+  app.innerHTML=`<div class="top"><button class="ic" data-a="back">←</button><div class="code"><small>${rd?'MODE':'KODE ROOM'}</small><b ${rd?'style="font-size:24px;letter-spacing:.12em"':''}>${rd?'LAWAN ACAK':S.code}</b></div>${rd?'<span style="width:48px"></span>':'<button class="btn sec sm" data-a="share">Salin</button>'}</div>
   <section class="players">${[0,1].map(i=>{const x=P[i];
     if(!x)return `<div class="glass pl"><div class="sk w60"></div><div class="sk w40"></div><div class="sk w30"></div></div>`;
     const mine=i===me;
@@ -420,12 +434,12 @@ function game(R){
   const live=R.status==='playing',my=live&&g.turn===me,ok=c=>okc(c,mine,g.color,top),can=mine.some(ok),won=g.win===me;
   const cd=(c,cls='',x='')=>`<button class="card ${c[0]==='k'?'wild':''} ${cls}" style="--c:var(--${c[0]})" ${x}><i>${lab(c[1])}</i><b>${lab(c[1])}</b></button>`;
   const mini=c=>`<div class="card mini ${c[0]==='k'?'wild':''}" style="--c:var(--${c[0]})"><b>${lab(c[1])}</b></div>`;
-  const ms=Math.max(0,S.dl-Date.now()),rem=Math.ceil(ms/1000);
+  const pzd=g.pz!==undefined,ms=pzd?g.left:Math.max(0,S.dl-Date.now()),rem=Math.ceil(ms/1000);
   const bn=live?(my?(can?'Giliranmu — pilih kartu':'Kamu tidak punya kartu yang cocok — silakan ambil kartu'):'Menunggu '+esc(p[op].n)+'…'):(won?'Kamu menang':'Kamu kalah');
   const res=won?'Kamu menang':'Kamu kalah';
   app.innerHTML=`<div class="top gtop"><button class="ic" data-a="lobby">←</button>
   <div class="glass score"><div class="sd me"><small>${esc(p[me].n)}</small><em>${p[me].w||0}</em></div><span style="color:var(--mut)">:</span><div class="sd op"><em>${p[op].w||0}</em><small>${esc(p[op].n)}</small></div></div>
-  <div class="tm ${my?'mine':'idle'} ${my&&rem<=5?'hot':''}" id="tm" style="--p:${my?Math.min(100,ms/(S.dur*10)):0}"><span>${my?rem:'•••'}</span></div></div>
+  <div class="rt">${live?'<button class="ic" data-a="pause" aria-label="Jeda"><span class="pzi"><i></i><i></i></span></button>':''}<div class="tm ${my?'mine':'idle'} ${my&&rem<=5?'hot':''}" id="tm" style="--p:${my?Math.min(100,ms/(S.dur*10)):0}"><span>${my?rem:'•••'}</span></div></div></div>
   <div class="glass banner ${my?'me':''}">${bn}</div>
   <div class="msg">${esc(g.msg||'')}</div>
   <div class="table">
@@ -436,15 +450,17 @@ function game(R){
   <button class="btn sec draw ${my&&!can?'pulse':''}" data-a="draw" ${my?'':'disabled'}>Ambil kartu</button>
   <div class="hh"><span>Kartumu (${mine.length})</span><span>sisa tumpukan: ${(g.deck||[]).length}</span></div>
   <div class="hand">${mine.map((c,i)=>cd(c,my?(ok(c)?'ok':'no'):'',`data-a="play" data-i="${i}"`)).join('')}</div>
-  ${!live&&S.hide?`<div class="glass resbar"><b>${res}</b><button class="btn sec sm" data-a="show">Lihat hasil</button>${me===0?'<button class="btn pri sm" data-a="next">Ronde berikutnya</button>':''}</div>`:''}
+  ${!live&&S.hide?`<div class="glass resbar"><b>${res}</b><button class="btn sec sm" data-a="show">Lihat hasil</button>${R.dead?'<button class="btn pri sm" data-a="back">Keluar</button>':`<button class="btn ${p[me].ready?'dng':'pri'} sm" data-a="ready">${p[me].ready?'Batal siap':'Siap main lagi'}</button>`}</div>`:''}
+  ${live&&pzd?`<div class="modal"><div class="glass res pause"><div class="medal"><span class="pzi big"><i></i><i></i></span></div><h2>Game dijeda</h2><p class="sub">${g.pz===me?'Kamu menjeda permainan':esc(p[g.pz].n)+' menjeda permainan'}</p>${g.pz===me?'<button class="btn pri" data-a="resume">Lanjutkan</button>':'<div class="wait">Menunggu '+esc(p[g.pz].n)+' melanjutkan…</div>'}<button class="btn ghost" data-a="lobby">Home</button></div></div>`:''}
   ${S.pick!=null?`<div class="modal"><div class="glass"><h2>Pilih warna</h2><div class="cols">${'rygb'.split('').map(c=>`<button class="col" style="--c:var(--${c})" data-a="col" data-c="${c}" aria-label="${CN[c]}"></button>`).join('')}</div><button class="btn sec sm" data-a="cancel">Batal</button></div></div>`:''}
-  ${!live&&!S.hide?`<div class="modal"><div class="glass res ${won?'win':'lose'}"><button class="x" data-a="hide" aria-label="Tutup">✕</button>
+  ${!live&&!S.hide&&!S.hold?`<div class="modal"><div class="glass res ${won?'win':'lose'}"><button class="x" data-a="hide" aria-label="Tutup">✕</button>
   <div class="medal">${won?'🏆':'😵'}</div><h2>${won?'Kamu menang!':'Kamu kalah'}</h2>
-  <p class="sub">${won?'Kamu menghabiskan kartumu duluan!':esc(p[g.win].n)+' menghabiskan kartunya duluan!'}</p>
+  <p class="sub">${g.k==='f'?(won?esc(p[op].n)+' sudah offline — permainan berakhir':'Kamu tidak aktif 3 kali berturut-turut'):(won?'Kamu menghabiskan kartumu duluan!':esc(p[g.win].n)+' menghabiskan kartunya duluan!')}</p>
   <div class="score" style="justify-content:center"><div class="sd me"><small>${esc(p[me].n)}</small><em>${p[me].w||0}</em></div><span style="color:var(--mut)">:</span><div class="sd op"><em>${p[op].w||0}</em><small>${esc(p[op].n)}</small></div></div>
-  ${me===0?'<button class="btn pri" data-a="next">Ronde berikutnya</button>':'<div class="wait">Menunggu pemilik room memulai ronde baru…</div>'}
+  ${R.dead?'<button class="btn pri" data-a="back">Keluar ke beranda</button>':`<button class="btn ${p[me].ready?'dng':'pri'}" data-a="ready">${p[me].ready?'Batal siap':'Siap main lagi'}</button>
+  <div class="wait ${p[op].ready?'okk':'nok'}">${esc(p[op].n)} ${p[op].ready?'sudah siap':'belum siap'}</div>`}
   <button class="btn sec" data-a="shareres">Bagikan hasil</button>
-  <button class="btn ghost" data-a="lobby">Kembali ke lobby</button></div></div>`:''}`}
+  ${R.dead?'':'<button class="btn ghost" data-a="lobby">Kembali ke lobby</button>'}</div></div>`:''}`}
 
 function play(i,col){
   const R=S.room,g=R.g,me=S.slot,c=(g['h'+me]||[])[i],top=g.disc[0];
@@ -477,9 +493,9 @@ app.onclick=async e=>{
     if(a==='shareres'){const R=S.room,me=S.slot,op=1-me,txt=`Velour UNO — ${R.p[me].n} ${R.p[me].w||0} : ${R.p[op].w||0} ${R.p[op].n}`;
       if(navigator.share)navigator.share({title:'Velour UNO',text:txt,url:location.origin}).catch(()=>{});
       else{await navigator.clipboard.writeText(txt+' '+location.origin);toast('Hasil disalin')}return}
-    if(a==='share'){const u=location.origin+'/r/'+S.code;
-      if(navigator.share)navigator.share({title:'Main Velour',text:'Gabung room '+S.code,url:u}).catch(()=>{});
-      else{await navigator.clipboard.writeText(u);toast('Link disalin')}return}
+    if(a==='share'){const c=S.code;try{await navigator.clipboard.writeText(c)}catch(e){const x=document.createElement('textarea');x.value=c;document.body.append(x);x.select();try{document.execCommand('copy')}catch(_){}x.remove()}toast('Kode '+c+' disalin');return}
+    if(a==='pause')return go({act:'pause'});
+    if(a==='resume')return go({act:'resume'});
     if(a==='hand')return go({act:'hand',n:+t.dataset.n});
     if(a==='ready')return go({act:'ready'});
     if(a==='play')return play(+t.dataset.i);
@@ -491,7 +507,7 @@ app.onclick=async e=>{
     if(a==='show'){S.hide=0;return view()}
   }catch(err){if(start){cleanup();home()}toast(err.message)}};
 
-setInterval(()=>{const R=S.R;if(S.host&&R&&R.status==='playing'&&Date.now()>R.g.dl){auto(R);bcast()}},400);
+setInterval(()=>{const R=S.R;if(S.host&&R&&R.status==='playing'){const g=R.g;if(g.pz!==undefined){if(Date.now()-g.pt>120000){g.dl=Date.now()+g.pl;delete g.pz;bcast()}}else if(Date.now()>g.dl){auto(R);bcast()}}},400);
 setInterval(()=>{if(S.host&&S.gh&&S.R?.p[1])S.gh.publish('hb',{}).catch(()=>{})},4000);
 setInterval(()=>{if(S.code&&!S.host&&S.last&&Date.now()-S.last>15000)roomClosed()},3000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)S.last=Date.now()});
